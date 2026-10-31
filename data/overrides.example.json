@@ -1,0 +1,9 @@
+{
+  "notes": "示例人工覆盖层：抬升一座仙山、强制一块陆地",
+  "elevationPatches": [
+    { "lon": 105, "lat": 32, "radiusDeg": 3, "deltaM": 2200 }
+  ],
+  "forceLand": [
+    { "lon": 0, "lat": 0, "radiusDeg": 2 }
+  ]
+}

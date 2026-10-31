@@ -1,0 +1,32 @@
+[
+  {
+    "key": "0:2:0:0",
+    "elevDigest": "9570a939",
+    "res": 33
+  },
+  {
+    "key": "1:2:0:0",
+    "elevDigest": "7d057656",
+    "res": 33
+  },
+  {
+    "key": "2:2:0:0",
+    "elevDigest": "3b90e0a2",
+    "res": 33
+  },
+  {
+    "key": "3:2:0:0",
+    "elevDigest": "09dfa04c",
+    "res": 33
+  },
+  {
+    "key": "4:2:0:0",
+    "elevDigest": "8aa5725b",
+    "res": 33
+  },
+  {
+    "key": "5:2:0:0",
+    "elevDigest": "36706609",
+    "res": 33
+  }
+]

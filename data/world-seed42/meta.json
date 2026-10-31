@@ -1,0 +1,17 @@
+{
+  "seed": 2279835011,
+  "seedInput": "42",
+  "radiusKm": 6371,
+  "width": 256,
+  "height": 128,
+  "seaLevel": 0,
+  "elevDigest": "70e0d581",
+  "biomeDigest": "1e0f04b8",
+  "settlementCount": 64,
+  "roadCount": 111,
+  "sectCount": 29,
+  "riverCount": 20,
+  "lakeCount": 478,
+  "caveCount": 13,
+  "generatedAt": "2026-10-31T12:47:18.400Z"
+}

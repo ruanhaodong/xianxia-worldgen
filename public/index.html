@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>仙侠世界地图生成器 · Xianxia Worldgen</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>仙侠世界地图生成器</h1>
+      <div class="sub">立方体球 + 四叉树 LOD · 引擎无关数据层</div>
+
+      <label for="seed">世界种子 Seed</label>
+      <input id="seed" type="text" value="九州·42" />
+
+      <button id="btn-generate">生成世界</button>
+      <button id="btn-fly" class="secondary">切换飞行模式 (最高 1000 m/s)</button>
+
+      <div class="toggles">
+        <label class="row"><input type="checkbox" id="ly-elev" checked /> 高程着色</label>
+        <label class="row"><input type="checkbox" id="ly-biome" checked /> 生态/气候</label>
+        <label class="row"><input type="checkbox" id="ly-rivers" checked /> 河流湖泊</label>
+        <label class="row"><input type="checkbox" id="ly-settle" checked /> 聚落</label>
+        <label class="row"><input type="checkbox" id="ly-roads" checked /> 道路</label>
+        <label class="row"><input type="checkbox" id="ly-sects" checked /> 宗门</label>
+      </div>
+
+      <div class="stats" id="stats">尚未生成…</div>
+      <p class="hint">
+        3D：拖拽旋转，滚轮缩放（太空→地面）。飞行模式：WASD 移动，Shift 加速，空格上升，Ctrl 下降。
+        同一种子保证山河道路一致。
+      </p>
+    </aside>
+    <div id="main">
+      <div id="map2d-wrap">
+        <div class="badge">2D 等矩形概览（全球骨架）</div>
+        <canvas id="map2d"></canvas>
+      </div>
+      <div id="globe-wrap">
+        <div class="badge" id="globe-badge">3D 星球 LOD</div>
+        <canvas id="globe"></canvas>
+      </div>
+    </div>
+  </div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./js/vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="js/viewer/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "xianxia-worldgen",
+  "version": "0.1.0",
+  "description": "Engine-independent xianxia world map generator (cube-sphere + quadtree LOD)",
+  "type": "module",
+  "scripts": {
+    "cli": "node src/cli/generate.mjs",
+    "serve": "npx --yes serve public -l 4173",
+    "build:viewer": "node scripts/build-viewer.mjs",
+    "test:determinism": "node src/cli/test-determinism.mjs",
+    "screenshot": "node scripts/screenshot.mjs"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

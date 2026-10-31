@@ -1,0 +1,7 @@
+node_modules/
+public/js/core/
+public/js/geo/
+public/js/settlement/
+public/js/vendor/
+data/world/
+*.log

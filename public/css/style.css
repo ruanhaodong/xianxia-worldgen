@@ -1,0 +1,57 @@
+:root {
+  --bg: #0b1020;
+  --panel: #141a2eec;
+  --text: #e8eefc;
+  --muted: #8a96b0;
+  --accent: #7aa2ff;
+  --accent2: #c084fc;
+  --border: #2a3555;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--text);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+}
+#app { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+#sidebar {
+  background: var(--panel); border-right: 1px solid var(--border);
+  padding: 16px; overflow-y: auto; z-index: 2;
+}
+#sidebar h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 0.04em; }
+#sidebar .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+input[type="text"], input[type="number"] {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: #0d1324; color: var(--text);
+}
+button {
+  margin-top: 10px; width: 100%; padding: 10px;
+  border: 0; border-radius: 8px; cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #0b1020; font-weight: 700;
+}
+button.secondary { background: #1c2540; color: var(--text); border: 1px solid var(--border); }
+.toggles label.row {
+  display: flex; align-items: center; gap: 8px; color: var(--text); margin: 6px 0;
+  font-size: 13px;
+}
+.stats {
+  margin-top: 14px; font-size: 12px; line-height: 1.55; color: var(--muted);
+  background: #0d1324; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+}
+.stats strong { color: var(--text); }
+#main { position: relative; display: grid; grid-template-rows: 1fr 1fr; }
+#map2d-wrap, #globe-wrap { position: relative; min-height: 0; border-bottom: 1px solid var(--border); }
+#map2d-wrap canvas, #globe-wrap canvas { width: 100%; height: 100%; display: block; }
+.badge {
+  position: absolute; left: 10px; top: 10px; z-index: 1;
+  background: #0d1324cc; border: 1px solid var(--border);
+  padding: 4px 8px; border-radius: 6px; font-size: 11px; color: var(--muted);
+}
+.hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  #main { grid-template-rows: 40vh 1fr; }
+}
