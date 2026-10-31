@@ -5,3 +5,4 @@ public/js/settlement/
 public/js/vendor/
 data/world/
 *.log
+screenshots/console-errors.txt

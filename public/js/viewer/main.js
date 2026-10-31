@@ -1,6 +1,5 @@
 /**
- * Viewer: 2D equirectangular map + 3D cube-sphere LOD globe.
- * Generation runs in-browser using the same modules as the CLI.
+ * Viewer: 2D map + 3D cube-sphere LOD + ground detail + NPCs + player mode.
  */
 import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/controls/OrbitControls.js';
@@ -10,16 +9,21 @@ import {
   digestWorld,
   EARTH_RADIUS_KM,
 } from '../core/worldgen.js';
-import { selectLodNodesV2, nodeUvBounds } from '../core/quadtree.js';
+import { selectLodNodesV2 } from '../core/quadtree.js';
 import { faceUvToSphere } from '../core/cubesphere.js';
 import { BIOME_COLORS } from '../geo/climate.js';
-import { vnorm } from '../core/math.js';
+import { xyzToLonLat } from '../core/math.js';
+import { GroundDetailSystem, GROUND_ALT_M, mobileCaps } from './groundDetail.js';
+import { NpcSystem } from './npcs.js';
+import { PlayerController, setupTouchControls } from './player.js';
 
 const $ = (id) => document.getElementById(id);
+const caps = mobileCaps();
 
 let session = null;
 let flyMode = false;
-let flySpeed = 200; // m/s, up to 1000
+let playerMode = false;
+let flySpeed = 200;
 const MAX_FLY = 1000;
 
 const layers = {
@@ -31,6 +35,16 @@ const layers = {
   showSects: true,
 };
 
+// Dynamic height exaggeration: strong from space, modest near ground
+function currentExaggerate(alt) {
+  if (alt < 3000) return 2.2;
+  if (alt < 30000) return 2.2 + (25 - 2.2) * ((alt - 3000) / 27000);
+  if (alt < 300000) return 25;
+  return 25;
+}
+let lastExag = 25;
+let forceRebuild = false;
+
 // ---------- 2D map ----------
 const mapCanvas = $('map2d');
 const mapCtx = mapCanvas.getContext('2d');
@@ -40,48 +54,87 @@ function draw2D() {
   const { width, height, rgba } = skeletonToRGBA(session.skeleton, layers);
   mapCanvas.width = width;
   mapCanvas.height = height;
-  const img = new ImageData(rgba, width, height);
-  // draw scaled to container
   const wrap = $('map2d-wrap');
   const cssW = wrap.clientWidth;
   const cssH = wrap.clientHeight;
   mapCtx.setTransform(1, 0, 0, 1, 0, 0);
-  // Fit
   const scale = Math.min(cssW / width, cssH / height);
   mapCanvas.style.width = width * scale + 'px';
   mapCanvas.style.height = height * scale + 'px';
-  mapCtx.putImageData(img, 0, 0);
+  mapCtx.putImageData(imgData(rgba, width, height), 0, 0);
+}
+
+function imgData(rgba, w, h) {
+  return new ImageData(rgba, w, h);
 }
 
 // ---------- 3D globe ----------
 const globeCanvas = $('globe');
-const renderer = new THREE.WebGLRenderer({ canvas: globeCanvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setClearColor(0x050814, 1);
+const renderer = new THREE.WebGLRenderer({
+  canvas: globeCanvas,
+  antialias: !caps.mobile,
+  alpha: false,
+  powerPreference: caps.mobile ? 'low-power' : 'high-performance',
+});
+renderer.setPixelRatio(caps.pixelRatio);
+renderer.setClearColor(0x87b5e0, 1);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x050814, 0.00000002);
+scene.fog = new THREE.FogExp2(0x87b5e0, 0.000000015);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 1, EARTH_RADIUS_KM * 20 * 1000);
-const R = EARTH_RADIUS_KM * 1000; // meters
+const R = EARTH_RADIUS_KM * 1000;
 camera.position.set(0, 0, R * 3);
+camera.near = 0.5;
+camera.far = R * 20;
 
 const controls = new OrbitControls(camera, globeCanvas);
 controls.enableDamping = true;
-controls.minDistance = R * 1.001;
+controls.minDistance = R + 3;
 controls.maxDistance = R * 8;
 controls.target.set(0, 0, 0);
+controls.zoomSpeed = caps.mobile ? 1.2 : 1.0;
 
-scene.add(new THREE.AmbientLight(0x8899bb, 0.55));
-const sun = new THREE.DirectionalLight(0xfff2dd, 1.1);
+// Lighting
+const hemi = new THREE.HemisphereLight(0xb1d0ff, 0x3a2a18, 0.55);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.15);
 sun.position.set(R * 2, R, R);
 scene.add(sun);
+const fill = new THREE.AmbientLight(0x8899bb, 0.35);
+scene.add(fill);
+
+// Sky dome (simple)
+const skyGeo = new THREE.SphereGeometry(R * 12, 24, 16);
+const skyMat = new THREE.MeshBasicMaterial({
+  color: 0x6aa6d8,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const sky = new THREE.Mesh(skyGeo, skyMat);
+scene.add(sky);
+
+// Mist volume near peaks — soft sphere particles parented later; use fog density tweak
+let mistDensity = 0.000000015;
 
 const globeGroup = new THREE.Group();
 scene.add(globeGroup);
 
 const chunkMeshes = new Map();
 const keys = { w: false, a: false, s: false, d: false, shift: false, space: false, ctrl: false };
+
+const getExag = () => currentExaggerate(Math.max(10, altitudeM()));
+
+const ground = new GroundDetailSystem(scene, { R, getExaggerate: getExag });
+const npcs = new NpcSystem(scene, {
+  R,
+  getExaggerate: getExag,
+  maxNpcs: caps.mobile ? 12 : 24,
+});
+const player = new PlayerController(scene, camera, globeCanvas, {
+  R,
+  getExaggerate: getExag,
+});
 
 function elevColor(e, biome) {
   if (layers.showBiome) {
@@ -96,14 +149,12 @@ function elevColor(e, biome) {
   return new THREE.Color(0.2 + t * 0.6, 0.4 - t * 0.2, 0.15);
 }
 
-function buildChunkMesh(chunk) {
+function buildChunkMesh(chunk, exaggerate) {
   const res = chunk.res;
   const positions = [];
   const colors = [];
   const indices = [];
   const b = chunk.uv;
-  const heightScale = 1; // meters already; exaggerate slightly for visibility from space
-  const exaggerate = 25;
 
   for (let j = 0; j < res; j++) {
     for (let i = 0; i < res; i++) {
@@ -128,14 +179,9 @@ function buildChunkMesh(chunk) {
     }
   }
 
-  // Skirt: drop outer ring vertices slightly along -normal to hide cracks
-  // (already using shared UV edges via continuous sampling; add thin skirt geo)
   const skirtDepth = 800 * exaggerate;
-  const baseVertCount = res * res;
-  // four edges
   const edges = [];
   for (let i = 0; i < res; i++) edges.push([i, 0], [i, res - 1], [0, i], [res - 1, i]);
-  const skirtIndexStart = positions.length / 3;
   const edgeMap = [];
   for (const [i, j] of edges) {
     const idx = j * res + i;
@@ -150,10 +196,7 @@ function buildChunkMesh(chunk) {
     const col = elevColor(e, chunk.biome[idx]);
     colors.push(col.r * 0.5, col.g * 0.5, col.b * 0.5);
   }
-  // connect skirt (approximate pairs)
-  for (let k = 0; k < edgeMap.length; k++) {
-    // skip connecting arbitrary — simple degenerate OK for prototype
-  }
+  void edgeMap;
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -183,26 +226,71 @@ function altitudeM() {
   return Math.hypot(p.x, p.y, p.z) - R;
 }
 
+function clearChunks() {
+  for (const [, mesh] of chunkMeshes) {
+    globeGroup.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+  chunkMeshes.clear();
+}
+
 function refreshLod() {
   if (!session) return;
   const dir = cameraDirOnSphere();
-  const alt = Math.max(100, altitudeM());
-  // farther → coarser; keep global coverage at minLevel
+  const alt = Math.max(10, altitudeM());
+  const exaggerate = currentExaggerate(alt);
+
+  if (Math.abs(exaggerate - lastExag) / lastExag > 0.2 || forceRebuild) {
+    clearChunks();
+    lastExag = exaggerate;
+    forceRebuild = false;
+  }
+
+  // Fog / sky for ground view
+  if (alt < GROUND_ALT_M) {
+    mistDensity = 0.00012;
+    scene.fog.density = mistDensity;
+    scene.fog.color.setHex(0xb8d4e8);
+    renderer.setClearColor(0xb8d4e8, 1);
+    skyMat.color.setHex(0xa8c8e8);
+    // Near clip for ground
+    camera.near = 0.5;
+    camera.far = Math.max(5000, alt * 40 + caps.drawDistance * 20);
+    camera.updateProjectionMatrix();
+  } else if (alt < 80000) {
+    scene.fog.density = 0.00000008;
+    scene.fog.color.setHex(0x6a90b8);
+    renderer.setClearColor(0x6a90b8, 1);
+    camera.near = Math.max(1, alt * 0.01);
+    camera.far = R * 8;
+    camera.updateProjectionMatrix();
+  } else {
+    scene.fog.density = 0.000000015;
+    scene.fog.color.setHex(0x050814);
+    renderer.setClearColor(0x050814, 1);
+    skyMat.color.setHex(0x050814);
+    camera.near = Math.max(100, alt * 0.02);
+    camera.far = R * 20;
+    camera.updateProjectionMatrix();
+  }
+
   let maxLevel = 4;
   let minLevel = 2;
   if (alt < R * 0.8) { maxLevel = 5; minLevel = 3; }
   if (alt < R * 0.25) { maxLevel = 6; }
   if (alt < 800000) { maxLevel = 7; }
   if (alt < 80000) { maxLevel = 8; }
+  if (alt < 8000) { maxLevel = 9; }
+  if (alt < 2000) { maxLevel = 10; }
 
   const nodes = selectLodNodesV2(dir, {
     minLevel,
-    maxLevel: Math.min(maxLevel, session.config.maxLodLevel ?? 7),
-    splitFactor: 2.8,
+    maxLevel: Math.min(maxLevel, (session.config.maxLodLevel ?? 7) + (alt < 5000 ? 2 : 0)),
+    splitFactor: alt < 5000 ? 2.2 : 2.8,
     radiusKm: EARTH_RADIUS_KM,
   });
 
-  // Prioritize near-camera nodes so the facing hemisphere fills first
   nodes.sort((a, b) => {
     const ca = faceUvToSphere(a.face, (a.x + 0.5) / (1 << a.level), (a.y + 0.5) / (1 << a.level));
     const cb = faceUvToSphere(b.face, (b.x + 0.5) / (1 << b.level), (b.y + 0.5) / (1 << b.level));
@@ -212,7 +300,6 @@ function refreshLod() {
   });
 
   const needed = new Set(nodes.map((n) => `${n.face}:${n.level}:${n.x}:${n.y}`));
-
   for (const [key, mesh] of chunkMeshes) {
     if (!needed.has(key)) {
       globeGroup.remove(mesh);
@@ -222,20 +309,25 @@ function refreshLod() {
     }
   }
 
-  // Large budget so a full coarse shell appears quickly
-  let budget = chunkMeshes.size < 40 ? 48 : 16;
+  let budget = chunkMeshes.size < 40 ? (caps.mobile ? 24 : 48) : (caps.mobile ? 8 : 16);
   for (const n of nodes) {
     const key = `${n.face}:${n.level}:${n.x}:${n.y}`;
     if (chunkMeshes.has(key)) continue;
     if (budget-- <= 0) break;
     const chunk = session.getChunk(n.face, n.level, n.x, n.y);
-    const mesh = buildChunkMesh(chunk);
+    const mesh = buildChunkMesh(chunk, exaggerate);
     chunkMeshes.set(key, mesh);
     globeGroup.add(mesh);
   }
 
+  // Ground detail + NPCs
+  ground.update(camera.position, alt);
+  const { lon, lat } = xyzToLonLat(dir);
+  npcs.update(lon, lat, alt, GROUND_ALT_M);
+
+  const modeLabel = playerMode ? '地面角色' : flyMode ? `飞行 ${flySpeed} m/s` : '轨道';
   $('globe-badge').textContent =
-    `3D LOD · 高度 ${ (altitudeM()/1000).toFixed(1) } km · chunks ${chunkMeshes.size} · ${flyMode ? '飞行 ' + flySpeed + ' m/s' : '轨道'}`;
+    `3D LOD · 高度 ${(alt / 1000).toFixed(2)} km · chunks ${chunkMeshes.size} · 细节 ${ground.chunks.size} · ${modeLabel}`;
 }
 
 function resize() {
@@ -266,27 +358,27 @@ function updateStats() {
 function generate() {
   const seed = $('seed').value || '42';
   $('stats').textContent = '生成中…';
-  // yield to UI
   setTimeout(() => {
-    // clear meshes
-    for (const [, mesh] of chunkMeshes) {
-      globeGroup.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-    }
-    chunkMeshes.clear();
+    clearChunks();
+    ground.clearAll();
+    npcs.clear();
+    if (playerMode) exitPlayerMode();
 
     session = new WorldSession(seed, null, {
       skeletonWidth: 256,
       skeletonHeight: 128,
-      maxLodLevel: 7,
+      maxLodLevel: 8,
       chunkResolution: 17,
-      cacheSize: 160,
+      cacheSize: caps.mobile ? 100 : 160,
       maxSettlements: 64,
       maxSects: 36,
     });
+    ground.setSession(session);
+    npcs.setSession(session);
+    player.setSession(session);
     updateStats();
     draw2D();
+    forceRebuild = true;
     refreshLod();
   }, 30);
 }
@@ -304,13 +396,7 @@ function bindLayers() {
     $(id).addEventListener('change', (e) => {
       layers[key] = e.target.checked;
       draw2D();
-      // rebuild chunk colors
-      for (const [, mesh] of chunkMeshes) {
-        globeGroup.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
-      }
-      chunkMeshes.clear();
+      clearChunks();
       refreshLod();
     });
   }
@@ -318,6 +404,7 @@ function bindLayers() {
 
 function setupFly() {
   $('btn-fly').addEventListener('click', () => {
+    if (playerMode) exitPlayerMode();
     flyMode = !flyMode;
     controls.enabled = !flyMode;
     $('btn-fly').textContent = flyMode
@@ -325,6 +412,7 @@ function setupFly() {
       : '切换飞行模式 (最高 1000 m/s)';
   });
   window.addEventListener('keydown', (e) => {
+    if (playerMode) return;
     const k = e.key.toLowerCase();
     if (k === 'w') keys.w = true;
     if (k === 'a') keys.a = true;
@@ -348,6 +436,61 @@ function setupFly() {
   });
 }
 
+function enterPlayerMode() {
+  if (!session) return;
+  if (flyMode) {
+    flyMode = false;
+    $('btn-fly').textContent = '切换飞行模式 (最高 1000 m/s)';
+  }
+  const pick = PlayerController.pickLonLatFromCamera(camera, session, ground);
+  // Dive camera near surface first so exaggerate drops
+  const p = {
+    x: Math.cos((pick.lat * Math.PI) / 180) * Math.cos((pick.lon * Math.PI) / 180),
+    y: Math.sin((pick.lat * Math.PI) / 180),
+    z: Math.cos((pick.lat * Math.PI) / 180) * Math.sin((pick.lon * Math.PI) / 180),
+  };
+  // Place camera ~800m above for ground spawn
+  const rad = R + 600;
+  camera.position.set(p.x * rad, p.y * rad, p.z * rad);
+  controls.target.set(0, 0, 0);
+  camera.lookAt(0, 0, 0);
+  forceRebuild = true;
+  refreshLod();
+
+  playerMode = true;
+  controls.enabled = false;
+  player.enter(pick.lon, pick.lat);
+  $('btn-ground').textContent = '退出地面 / 返回轨道';
+  $('btn-ground').classList.add('active');
+  const hint = pick.settlement
+    ? `已进入聚落附近（${pick.settlement.type}）`
+    : '已进入地面（点击处 / 当前视角）';
+  $('mode-hint').textContent = hint;
+}
+
+function exitPlayerMode() {
+  playerMode = false;
+  player.exit();
+  controls.enabled = !flyMode;
+  // Lift camera a bit for orbit
+  const len = camera.position.length();
+  const want = Math.max(len, R + 5000);
+  camera.position.multiplyScalar(want / len);
+  controls.target.set(0, 0, 0);
+  $('btn-ground').textContent = '进入地面 / 成为角色';
+  $('btn-ground').classList.remove('active');
+  $('mode-hint').textContent = '';
+  forceRebuild = true;
+}
+
+function setupPlayerUI() {
+  $('btn-ground').addEventListener('click', () => {
+    if (playerMode) exitPlayerMode();
+    else enterPlayerMode();
+  });
+  setupTouchControls(player);
+}
+
 let lastT = performance.now();
 let lodTick = 0;
 
@@ -356,8 +499,11 @@ function animate(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
 
-  if (flyMode) {
-    const speed = (keys.shift ? Math.min(MAX_FLY, flySpeed * 3) : flySpeed);
+  if (playerMode) {
+    player.tick(dt);
+    npcs.tick(dt);
+  } else if (flyMode) {
+    const speed = keys.shift ? Math.min(MAX_FLY, flySpeed * 3) : flySpeed;
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
     const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
@@ -372,23 +518,68 @@ function animate(t) {
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(speed * dt);
       camera.position.add(move);
-      // keep above surface
       const len = camera.position.length();
-      const minR = R + 50;
+      const minR = R + 5;
       if (len < minR) camera.position.multiplyScalar(minR / len);
     }
   } else {
     controls.update();
   }
 
-  if (++lodTick % 20 === 0) refreshLod();
+  if (!playerMode) npcs.tick(dt);
+
+  if (++lodTick % (caps.mobile ? 30 : 20) === 0) refreshLod();
+  // Keep ground streaming while in player mode more often
+  if (playerMode && lodTick % 10 === 0) {
+    const alt = Math.max(10, altitudeM());
+    ground.update(camera.position, alt);
+    const dir = cameraDirOnSphere();
+    const { lon, lat } = xyzToLonLat(dir);
+    npcs.update(lon, lat, alt, GROUND_ALT_M);
+  }
+
   renderer.render(scene, camera);
 }
 
 $('btn-generate').addEventListener('click', generate);
 bindLayers();
 setupFly();
+setupPlayerUI();
 window.addEventListener('resize', resize);
 resize();
 generate();
 requestAnimationFrame(animate);
+
+// Expose for playwright tests
+window.__xianxia = {
+  getAltitude: () => altitudeM(),
+  enterPlayer: () => enterPlayerMode(),
+  exitPlayer: () => exitPlayerMode(),
+  isPlayer: () => playerMode,
+  diveToGround: () => {
+    // Move camera above a known settlement (target stays at origin for float stability)
+    if (!session?.skeleton?.settlements?.length) return false;
+    const s = session.skeleton.settlements[0];
+    const lat = s.lat * Math.PI / 180;
+    const lon = s.lon * Math.PI / 180;
+    const p = {
+      x: Math.cos(lat) * Math.cos(lon),
+      y: Math.sin(lat),
+      z: Math.cos(lat) * Math.sin(lon),
+    };
+    const rad = R + 500;
+    controls.enabled = false;
+    camera.position.set(p.x * rad, p.y * rad, p.z * rad);
+    controls.target.set(0, 0, 0);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+    controls.enabled = !playerMode && !flyMode;
+    forceRebuild = true;
+    refreshLod();
+    // Nudge controls spherical to match
+    controls.update();
+    return true;
+  },
+  getDetailChunks: () => ground.chunks.size,
+  getNpcCount: () => npcs.npcs.length,
+};
