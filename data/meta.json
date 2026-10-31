@@ -1,0 +1,17 @@
+{
+  "seed": 3765241769,
+  "seedInput": "九州·42",
+  "radiusKm": 6371,
+  "width": 256,
+  "height": 128,
+  "seaLevel": 0,
+  "elevDigest": "a4aa2edb",
+  "biomeDigest": "d726b845",
+  "settlementCount": 64,
+  "roadCount": 108,
+  "sectCount": 29,
+  "riverCount": 42,
+  "lakeCount": 347,
+  "caveCount": 21,
+  "generatedAt": "2026-10-31T12:47:22.778Z"
+}
